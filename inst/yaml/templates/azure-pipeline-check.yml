@@ -1,0 +1,60 @@
+trigger:
+- master
+
+pool:
+  vmImage: 'ubuntu-16.04'
+
+container:
+  image: 'rocker/geospatial:latest'
+
+variables:
+  _R_CHECK_FORCE_SUGGESTS_: false
+  MAKEFLAGS: "-j 2"
+
+steps:
+- bash: R -q -e 'writeLines(".libPaths(\"~/R-private\")", ".Rprofile"); dir.create("~/R-private", recursive = TRUE); print(Sys.getenv());'
+  displayName: "Preliminaries"
+
+- bash: R -q -e 'install.packages(c("covr", "roxygen2", "testthat", "remotes", "rcmdcheck")); remotes::install_deps(dependencies = TRUE);'
+  displayName: 'Install Dependencies'
+
+- script: |
+    sudo apt-get install libgsl-dev
+  displayName: 'Install libgsl'
+
+- bash: R -q -e "rcmdcheck::rcmdcheck(args = '--no-manual', error_on = 'error', check_dir = 'check')"
+  displayName: 'Check Package'
+  condition: succeededOrFailed()
+
+- bash: R -q -e 'cov <- covr::package_coverage(); covr::to_cobertura(cov, "coverage.xml")'
+  displayName: 'Run Code Coverage'
+  condition: succeededOrFailed()
+
+- task: UseDotNet@2
+  displayName: 'Use .NET Core sdk'
+  inputs:
+    packageType: sdk
+    version: 2.2.203
+    installationPath: $(Agent.ToolsDirectory)/dotnet
+  condition: succeededOrFailed()
+
+- task: PublishCodeCoverageResults@1
+  displayName: 'Publish Code Coverage'
+  inputs:
+    codeCoverageTool: 'Cobertura'
+    summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/coverage.xml'
+  condition: succeededOrFailed()
+
+- task: PublishTestResults@2
+  displayName: 'Publish Test Results'
+  inputs:
+    testResultsFormat: 'JUnit'
+    testResultsFiles: '**/test-*.xml'
+  condition: succeededOrFailed()
+
+- task: PublishBuildArtifacts@1
+  displayName: 'Publish Check log'
+  inputs:
+    pathToPublish: 'check/packagename.Rcheck/00check.log'
+    artifactName: check
+  condition: succeededOrFailed()
